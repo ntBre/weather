@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,6 +16,7 @@ const (
 	url      = "https://forecast.weather.gov/MapClick.php?lat=34.3651&lon=-89.5196&FcstType=digitalDWML"
 	longFmt  = "2006-01-02T15:04:05-07:00"
 	shortFmt = "01-02/15:00"
+	badInt = -999
 )
 
 type Result struct {
@@ -49,8 +51,8 @@ type Parameters struct {
 
 type Temperature struct {
 	// Type is either "dew point", "wind chill", or "hourly"
-	Type  string `xml:"type,attr"`
-	Value []int  `xml:"value"`
+	Type  string   `xml:"type,attr"`
+	Value []string `xml:"value"`
 }
 
 type Wind struct {
@@ -77,18 +79,21 @@ func main() {
 		panic(err)
 	}
 	temps := make(map[string][]int)
-	for _, t := range res.Data.Parameters.Temps {
-		temps[t.Type] = t.Value
+	for _, ts := range res.Data.Parameters.Temps {
+		// this allows me to check for bad values, such as
+		// missing wind chills
+		for _, t := range ts.Value {
+			v, err := strconv.Atoi(t)
+			if err != nil {
+				v = badInt
+			}
+			temps[ts.Type] = append(temps[ts.Type], v)
+		}
 	}
 	winds := make(map[string][]int)
 	for _, t := range res.Data.Parameters.Winds {
 		winds[t.Type] = t.Value
 	}
-	// fmt.Println(len(res.Data.Parameters.Clouds))
-	// fmt.Println(len(res.Data.Parameters.Rain))
-	// fmt.Println(len(res.Data.Times.Values))
-	// fmt.Println(len(res.Data.Parameters.Humidity))
-	// fmt.Println(len(res.Data.Parameters.Direction))
 	now := time.Now().Format(longFmt)
 	var start int
 	// make sure we start at the current time
@@ -106,20 +111,57 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	tmax := temps["hourly"][start]
+	tmin := tmax
 	for i, t := range res.Data.Times.Values[start : end+1] {
 		tt, _ := time.Parse(longFmt, t)
-		fmt.Fprintf(f, "%s %d\n", tt.Format(shortFmt), temps["hourly"][i])
+		h := temps["hourly"][i]
+		d := temps["dew point"][i]
+		w := temps["wind chill"][i]
+		tmax = max(h, d, tmax)
+		tmin = min(h, d, tmin)
+		fmt.Fprintf(f, "%s %d %d %d\n", tt.Format(shortFmt),
+			h, d, w,
+		)
 	}
 	cmd := exec.Command("gnuplot", "--persist")
-	// set xrange ["11/24/21":"12/01/21"]
-	cmd.Stdin = strings.NewReader(`set terminal png medium size 640,480 font arial 12
+	cmd.Stdin = strings.NewReader(
+		fmt.Sprintf(`set terminal png medium size 640,480 font arial 12
 set output 'out.png'
 set bmargin 2.5
-unset key
 set xdata time
-set timefmt "%m-%d/%H:%M"
+set timefmt "%%m-%%d/%%H:%%M"
 set ylabel "Temperature (°F)"
-plot "/tmp/weather.dat" using 1:2 with linespoints
-`)
+set yrange [%d:%d]
+plot "/tmp/weather.dat" u 1:2 w linespoints lc rgb "red" title "Hourly", \
+"/tmp/weather.dat" u 1:3 w linespoints lc rgb "green" title "Dew Point", \
+"/tmp/weather.dat" u 1:($4 == %d ? NaN : $4) w linespoints lc rgb "blue" title "Wind Chill"
+`, tmin-5, tmax+10, badInt))
 	cmd.Run()
+}
+
+func max(ds ...int) int {
+	max := ds[0]
+	if len(ds) < 2 {
+		return max
+	}
+	for _, d := range ds[1:] {
+		if d > max {
+			max = d
+		}
+	}
+	return max
+}
+
+func min(ds ...int) int {
+	min := ds[0]
+	if len(ds) < 2 {
+		return min
+	}
+	for _, d := range ds[1:] {
+		if d < min && d != -999 {
+			min = d
+		}
+	}
+	return min
 }
