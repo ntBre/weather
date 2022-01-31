@@ -1,0 +1,12 @@
+#+title: weather
+
+This is a package for generating plots and eventually a dashboard for
+weather data taken from [[https://forecast.weather.gov][forecast.weather.gov]]. This is somewhat related
+to [[https://github.com/ntBre/weatherbar][my weatherbar project]], but it uses a different, and apparently
+fuller, source of data that includes a 7-day forecast of things like
+temperature, precipitation chance, humidity, and cloud cover.
+
+Right now I'm just extracting the data from the XML and plotting it
+with [[http://www.gnuplot.info/][gnuplot]]. A current example of the output is shown below.
+
+[[file:out.png]]
