@@ -16,7 +16,7 @@ const (
 	url      = "https://forecast.weather.gov/MapClick.php?lat=34.3651&lon=-89.5196&FcstType=digitalDWML"
 	longFmt  = "2006-01-02T15:04:05-07:00"
 	shortFmt = "01-02/15:00"
-	badInt = -999
+	badInt   = -999
 )
 
 type Result struct {
@@ -61,7 +61,7 @@ type Wind struct {
 	Value []int  `xml:"value"`
 }
 
-func main() {
+func GetWeather() *Result {
 	resp, err := http.Get(url)
 	if err != nil {
 		panic(err)
@@ -78,6 +78,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	return res
+}
+
+func main() {
+	res := GetWeather()
 	temps := make(map[string][]int)
 	for _, ts := range res.Data.Parameters.Temps {
 		// this allows me to check for bad values, such as
@@ -118,50 +123,32 @@ func main() {
 		h := temps["hourly"][i]
 		d := temps["dew point"][i]
 		w := temps["wind chill"][i]
+		r := res.Data.Parameters.Rain[i]
 		tmax = max(h, d, tmax)
 		tmin = min(h, d, tmin)
-		fmt.Fprintf(f, "%s %d %d %d\n", tt.Format(shortFmt),
-			h, d, w,
+		fmt.Fprintf(f, "%s %d %d %d %d\n", tt.Format(shortFmt),
+			h, d, w, r,
 		)
 	}
 	cmd := exec.Command("gnuplot", "--persist")
 	cmd.Stdin = strings.NewReader(
-		fmt.Sprintf(`set terminal png medium size 640,480 font arial 12
-set output 'out.png'
+		fmt.Sprintf(`set terminal png medium size 840,480 font arial 12
+set output '/tmp/forecast.png'
 set bmargin 2.5
+set lmargin 8.0
 set xdata time
 set timefmt "%%m-%%d/%%H:%%M"
 set ylabel "Temperature (°F)"
+set ytics nomirror
+set y2label "Rain chance (%%)" rotate by 270
+set y2tics 10
 set yrange [%d:%d]
+set y2range [0:105]
 plot "/tmp/weather.dat" u 1:2 w linespoints lc rgb "red" title "Hourly", \
 "/tmp/weather.dat" u 1:3 w linespoints lc rgb "green" title "Dew Point", \
-"/tmp/weather.dat" u 1:($4 == %d ? NaN : $4) w linespoints lc rgb "blue" title "Wind Chill"
+"/tmp/weather.dat" u 1:($4 == %d ? NaN : $4) w linespoints lc rgb "blue" title "Wind Chill", \
+"/tmp/weather.dat" u 1:5 w boxes lc rgb "#00bfff" title "Rain" axes x1y2
 `, tmin-5, tmax+10, badInt))
 	cmd.Run()
-}
-
-func max(ds ...int) int {
-	max := ds[0]
-	if len(ds) < 2 {
-		return max
-	}
-	for _, d := range ds[1:] {
-		if d > max {
-			max = d
-		}
-	}
-	return max
-}
-
-func min(ds ...int) int {
-	min := ds[0]
-	if len(ds) < 2 {
-		return min
-	}
-	for _, d := range ds[1:] {
-		if d < min && d != -999 {
-			min = d
-		}
-	}
-	return min
+	exec.Command("xwallpaper", "--center", "/tmp/forecast.png").Run()
 }
