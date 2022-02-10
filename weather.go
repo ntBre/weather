@@ -118,6 +118,7 @@ func main() {
 	}
 	tmax := temps["hourly"][start]
 	tmin := tmax
+	hmax, hmin := tmax, tmax
 	for i, t := range res.Data.Times.Values[start : end+1] {
 		tt, _ := time.Parse(longFmt, t)
 		h := temps["hourly"][i]
@@ -126,29 +127,43 @@ func main() {
 		r := res.Data.Parameters.Rain[i]
 		tmax = max(h, d, tmax)
 		tmin = min(h, d, tmin)
+		hmax = max(h, hmax)
+		hmin = min(h, hmin)
 		fmt.Fprintf(f, "%s %d %d %d %d\n", tt.Format(shortFmt),
 			h, d, w, r,
 		)
 	}
+
+	t1, _ := time.Parse(longFmt, res.Data.Times.Values[start])
+	t2, _ := time.Parse(longFmt, res.Data.Times.Values[end])
 	cmd := exec.Command("gnuplot", "--persist")
 	cmd.Stdin = strings.NewReader(
-		fmt.Sprintf(`set terminal png medium size 840,480 font arial 12
+		fmt.Sprintf(`set terminal pngcairo size 840,520 font "arial,12"
 set output '/tmp/forecast.png'
+fmin(x) = %d
+fmax(x) = %d
 set bmargin 2.5
 set lmargin 8.0
 set xdata time
 set timefmt "%%m-%%d/%%H:%%M"
+set xrange ["%s":"%s"]
 set ylabel "Temperature (°F)"
 set ytics nomirror
 set y2label "Rain chance (%%)" rotate by 270
 set y2tics 10
 set yrange [%d:%d]
 set y2range [0:105]
-plot "/tmp/weather.dat" u 1:2 w linespoints lc rgb "red" title "Hourly", \
+set mytics 5
+plot fmax(x) dt 2 lc rgb "#ff8c00" title "", fmin(x) dt 2 lc rgb "#00bfff" title "", \
+"/tmp/weather.dat" u 1:2 w linespoints lc rgb "red" title "Hourly", \
 "/tmp/weather.dat" u 1:3 w linespoints lc rgb "green" title "Dew Point", \
 "/tmp/weather.dat" u 1:($4 == %d ? NaN : $4) w linespoints lc rgb "blue" title "Wind Chill", \
 "/tmp/weather.dat" u 1:5 w boxes lc rgb "#00bfff" title "Rain" axes x1y2
-`, tmin-5, tmax+10, badInt))
+`,
+			hmin, hmax,
+			t1.Format(shortFmt), t2.Format(shortFmt),
+			tmin-5, tmax+10, badInt))
+	cmd.Stderr = os.Stderr
 	cmd.Run()
 	exec.Command("xwallpaper", "--center", "/tmp/forecast.png").Run()
 }
